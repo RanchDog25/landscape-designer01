@@ -9,12 +9,16 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
-import { Bell, LogOut, Settings, User } from "lucide-react";
+import { Bell, LogOut, Settings, User, MessageCircle } from "lucide-react";
+import ChatButton from "./ChatButton";
+import { getCurrentUser } from "@/lib/auth";
+import { useNavigate } from "react-router-dom";
 
 interface DashboardHeaderProps {
   userAvatar?: string;
   userName?: string;
   userRole?: string;
+  projectId?: string;
   onLogout?: () => void;
   onSettings?: () => void;
 }
@@ -22,19 +26,26 @@ interface DashboardHeaderProps {
 const DashboardHeader: React.FC<DashboardHeaderProps> = ({
   userAvatar = "https://api.dicebear.com/7.x/avataaars/svg?seed=default",
   userName = "John Doe",
-  userRole = "Landscaper",
+  userRole = "User",
+  projectId,
   onLogout = () => {},
   onSettings = () => {},
 }) => {
+  const navigate = useNavigate();
+  const user = getCurrentUser();
+
   return (
-    <header className="w-full h-[72px] px-6 border-b bg-white flex items-center justify-end">
+    <header className="w-full h-[72px] px-6 border-b bg-white flex items-center justify-between">
       <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" className="relative">
-          <Bell className="h-5 w-5" />
-          <span className="absolute -top-1 -right-1 h-4 w-4 bg-red-500 rounded-full text-[10px] text-white flex items-center justify-center">
-            3
-          </span>
-        </Button>
+        {user?.role === "admin" && (
+          <Button variant="outline" onClick={() => navigate("/admin")}>
+            Admin Dashboard
+          </Button>
+        )}
+      </div>
+
+      <div className="flex items-center gap-4">
+        <ChatButton projectId={projectId} />
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -52,12 +63,6 @@ const DashboardHeader: React.FC<DashboardHeaderProps> = ({
           <DropdownMenuContent align="end" className="w-56">
             <DropdownMenuLabel>My Account</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onClick={() => (window.location.href = "/profile")}
-            >
-              <User className="mr-2 h-4 w-4" />
-              Profile
-            </DropdownMenuItem>
             <DropdownMenuItem onClick={onSettings}>
               <Settings className="mr-2 h-4 w-4" />
               Settings

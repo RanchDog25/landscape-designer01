@@ -15,7 +15,7 @@ import {
 import { AddEventDialog } from "./AddEventDialog";
 import { DeleteEventDialog } from "./DeleteEventDialog";
 import { supabase } from "@/lib/supabase";
-import { useAuth } from "../auth/AuthProvider";
+import { getCurrentUser } from "@/lib/auth";
 import {
   Select,
   SelectContent,
@@ -49,7 +49,6 @@ interface ProjectCalendarProps {
 type ViewMode = "day" | "week" | "month" | "year";
 
 const ProjectCalendar: React.FC<ProjectCalendarProps> = ({ projectId }) => {
-  const { user } = useAuth();
   const [events, setEvents] = React.useState<ProjectEvent[]>([]);
   const [selectedDate, setSelectedDate] = React.useState<Date>(new Date());
   const [isAddEventOpen, setIsAddEventOpen] = React.useState(false);
@@ -60,9 +59,15 @@ const ProjectCalendar: React.FC<ProjectCalendarProps> = ({ projectId }) => {
   } | null>(null);
 
   const loadEvents = async () => {
+    if (!projectId) {
+      setEvents([]);
+      return;
+    }
+
     const { data, error } = await supabase
       .from("calendar_events")
       .select("*")
+      .eq("project_id", projectId)
       .order("start_date", { ascending: true });
 
     if (error) {
@@ -89,11 +94,18 @@ const ProjectCalendar: React.FC<ProjectCalendarProps> = ({ projectId }) => {
   React.useEffect(() => {
     loadEvents();
 
+    if (!projectId) return;
+
     const channel = supabase
-      .channel("calendar_events")
+      .channel(`calendar_events_${projectId}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "calendar_events" },
+        {
+          event: "*",
+          schema: "public",
+          table: "calendar_events",
+          filter: `project_id=eq.${projectId}`,
+        },
         () => {
           loadEvents();
         },
@@ -103,36 +115,36 @@ const ProjectCalendar: React.FC<ProjectCalendarProps> = ({ projectId }) => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [projectId]);
 
-  const handleAddEvent = async (eventData: {
+  const handleAddEvent = async (event: {
     title: string;
     description: string;
     date: Date;
     type: "milestone" | "task" | "meeting";
     duration: "all-day" | "half-day";
   }) => {
-    const { error } = await supabase.from("calendar_events").insert({
-      title: eventData.title,
-      description: eventData.description,
-      start_date: eventData.date.toISOString(),
-      type: eventData.type,
-      duration: eventData.duration,
-      status: "pending",
-      created_by: user?.id,
-      project_id: projectId,
-    });
+    if (!projectId) return;
 
-    if (error) {
+    try {
+      const { error } = await supabase.from("calendar_events").insert({
+        project_id: projectId,
+        title: event.title,
+        description: event.description,
+        start_date: event.date.toISOString(),
+        type: event.type,
+        duration: event.duration,
+        status: "pending",
+      });
+
+      if (error) throw error;
+      loadEvents();
+    } catch (error) {
       console.error("Error adding event:", error);
-      return;
     }
   };
 
-  const handleStatusChange = async (
-    eventId: string,
-    status: ProjectEvent["status"],
-  ) => {
+  const handleStatusChange = async (eventId: string, status: string) => {
     try {
       const { error } = await supabase
         .from("calendar_events")
@@ -140,146 +152,90 @@ const ProjectCalendar: React.FC<ProjectCalendarProps> = ({ projectId }) => {
         .eq("id", eventId);
 
       if (error) throw error;
-      await loadEvents();
+      loadEvents();
     } catch (error) {
       console.error("Error updating event status:", error);
     }
   };
 
-  const getVisibleEvents = () => {
-    return events.filter((event) => {
-      const eventDate = event.date;
-      switch (viewMode) {
-        case "day":
-          return eventDate.toDateString() === selectedDate.toDateString();
-        case "week":
-          const weekStart = new Date(selectedDate);
-          weekStart.setDate(selectedDate.getDate() - selectedDate.getDay());
-          const weekEnd = new Date(weekStart);
-          weekEnd.setDate(weekStart.getDate() + 6);
-          return eventDate >= weekStart && eventDate <= weekEnd;
-        case "month":
-          return (
-            eventDate.getMonth() === selectedDate.getMonth() &&
-            eventDate.getFullYear() === selectedDate.getFullYear()
-          );
-        case "year":
-          return eventDate.getFullYear() === selectedDate.getFullYear();
-        default:
-          return true;
-      }
-    });
-  };
-
-  const getBadgeColor = (
-    type: ProjectEvent["type"],
-    status: ProjectEvent["status"],
-  ) => {
-    if (status === "completed") return "bg-green-500";
-    if (status === "cancelled") return "bg-red-500";
-    if (status === "in_progress") return "bg-yellow-500";
-
-    switch (type) {
-      case "milestone":
-        return "bg-blue-500";
-      case "task":
-        return "bg-purple-500";
-      case "meeting":
-        return "bg-orange-500";
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case "completed":
+        return <CheckCircle className="h-4 w-4 text-green-500" />;
+      case "cancelled":
+        return <XCircle className="h-4 w-4 text-red-500" />;
+      case "in_progress":
+        return <PlayCircle className="h-4 w-4 text-blue-500" />;
       default:
-        return "bg-gray-500";
+        return null;
     }
   };
 
+  const getEventsByDate = (date: Date) => {
+    return events.filter(
+      (event) =>
+        event.date.getDate() === date.getDate() &&
+        event.date.getMonth() === date.getMonth() &&
+        event.date.getFullYear() === date.getFullYear(),
+    );
+  };
+
+  if (!projectId) {
+    return (
+      <div className="flex items-center justify-center h-full bg-background">
+        <p className="text-muted-foreground">
+          Select a project to view calendar
+        </p>
+      </div>
+    );
+  }
+
   return (
-    <div className="h-full w-full bg-white p-6">
-      <div className="flex h-full gap-6">
-        <Card className="flex-1 p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl font-semibold">Project Timeline</h2>
-            <div className="flex gap-2">
-              <Select
-                value={viewMode}
-                onValueChange={(value: ViewMode) => setViewMode(value)}
-              >
-                <SelectTrigger className="w-[120px]">
-                  <SelectValue placeholder="View" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="day">Day</SelectItem>
-                  <SelectItem value="week">Week</SelectItem>
-                  <SelectItem value="month">Month</SelectItem>
-                  <SelectItem value="year">Year</SelectItem>
-                </SelectContent>
-              </Select>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setIsAddEventOpen(true)}
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Add Event
-              </Button>
-            </div>
-          </div>
-          <Calendar
-            mode="single"
-            selected={selectedDate}
-            onSelect={(date) => {
-              if (date) {
-                setSelectedDate(date);
-                setViewMode("month");
-              }
-            }}
-            onMonthChange={(date) => {
-              setSelectedDate(date);
-              setViewMode("month");
-            }}
-            className="rounded-md border"
-          />
-        </Card>
+    <div className="flex h-full bg-background">
+      <div className="flex-1 p-6">
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-2xl font-semibold">Project Calendar</h2>
+          <Button onClick={() => setIsAddEventOpen(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            Add Event
+          </Button>
+        </div>
 
-        <Card className="w-[300px] p-6">
-          <div className="flex items-center gap-2 mb-6">
-            <CalendarDays className="h-5 w-5" />
-            <h3 className="text-lg font-medium">
-              {selectedDate.toLocaleDateString("en-US", {
-                month: "long",
-                year: "numeric",
-              })}
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr,300px] gap-6">
+          <Card className="p-4">
+            <Calendar
+              mode="single"
+              selected={selectedDate}
+              onSelect={(date) => date && setSelectedDate(date)}
+              className="rounded-md border"
+            />
+          </Card>
+
+          <Card className="p-4">
+            <h3 className="font-semibold mb-4">
+              Events for {selectedDate.toLocaleDateString()}
             </h3>
-          </div>
-
-          <ScrollArea className="h-[calc(100%-4rem)]">
-            <div className="space-y-4">
-              {getVisibleEvents().length > 0 ? (
-                getVisibleEvents().map((event) => (
-                  <div
-                    key={event.id}
-                    className="p-3 border rounded-lg hover:bg-gray-50 transition-colors"
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <Badge
-                        className={getBadgeColor(event.type, event.status)}
-                      >
-                        {event.type}
-                      </Badge>
+            <ScrollArea className="h-[500px]">
+              <div className="space-y-4">
+                {getEventsByDate(selectedDate).map((event) => (
+                  <Card key={event.id} className="p-4">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <h4 className="font-medium">{event.title}</h4>
+                        <p className="text-sm text-gray-500">
+                          {event.description}
+                        </p>
+                        <div className="flex gap-2 mt-2">
+                          <Badge variant="secondary">{event.type}</Badge>
+                          <Badge variant="outline">{event.duration}</Badge>
+                        </div>
+                      </div>
                       <div className="flex items-center gap-2">
-                        <Badge variant="outline">{event.duration}</Badge>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="sm">
-                              {event.status === "completed" && (
-                                <CheckCircle className="h-4 w-4 text-green-500" />
-                              )}
-                              {event.status === "in_progress" && (
-                                <PlayCircle className="h-4 w-4 text-yellow-500" />
-                              )}
-                              {event.status === "cancelled" && (
-                                <XCircle className="h-4 w-4 text-red-500" />
-                              )}
-                              {event.status === "pending" && (
-                                <PlayCircle className="h-4 w-4 text-gray-500" />
+                            <Button variant="ghost" size="icon">
+                              {getStatusIcon(event.status) || (
+                                <div className="h-2 w-2 rounded-full bg-yellow-500" />
                               )}
                             </Button>
                           </DropdownMenuTrigger>
@@ -289,62 +245,51 @@ const ProjectCalendar: React.FC<ProjectCalendarProps> = ({ projectId }) => {
                                 handleStatusChange(event.id, "pending")
                               }
                             >
-                              Set as Pending
+                              Pending
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() =>
                                 handleStatusChange(event.id, "in_progress")
                               }
                             >
-                              Start Task
+                              In Progress
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() =>
                                 handleStatusChange(event.id, "completed")
                               }
                             >
-                              Mark Complete
+                              Completed
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() =>
                                 handleStatusChange(event.id, "cancelled")
                               }
                             >
-                              Cancel Task
+                              Cancelled
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="hover:bg-destructive hover:text-destructive-foreground"
                           onClick={() =>
-                            setDeleteEvent({ id: event.id, title: event.title })
+                            setDeleteEvent({
+                              id: event.id,
+                              title: event.title,
+                            })
                           }
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
                     </div>
-                    <h4 className="font-medium">{event.title}</h4>
-                    {event.description && (
-                      <p className="text-sm text-gray-600 mt-1">
-                        {event.description}
-                      </p>
-                    )}
-                    <span className="text-xs text-gray-500 block mt-2">
-                      {event.date.toLocaleDateString()}
-                    </span>
-                  </div>
-                ))
-              ) : (
-                <p className="text-gray-500 text-center">
-                  No events scheduled for this {viewMode}
-                </p>
-              )}
-            </div>
-          </ScrollArea>
-        </Card>
+                  </Card>
+                ))}
+              </div>
+            </ScrollArea>
+          </Card>
+        </div>
       </div>
 
       <AddEventDialog

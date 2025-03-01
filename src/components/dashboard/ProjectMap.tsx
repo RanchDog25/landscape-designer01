@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Plus, Trash2, X, Maximize2, Minimize2, Map } from "lucide-react";
+import { Plus, Trash2, X, Maximize2, Minimize2, Map, Edit } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { uploadFile } from "@/lib/uploadFile";
 import {
@@ -51,6 +51,11 @@ const ProjectMapComponent: React.FC<ProjectMapProps> = ({ projectId }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
+  const [isEditingPoints, setIsEditingPoints] = useState(false);
+  const [editingAreaId, setEditingAreaId] = useState<string | null>(null);
+  const [draggedPointIndex, setDraggedPointIndex] = useState<number | null>(
+    null,
+  );
 
   if (!projectId) return null;
 
@@ -105,25 +110,39 @@ const ProjectMapComponent: React.FC<ProjectMapProps> = ({ projectId }) => {
 
     setIsUploading(true);
     try {
-      const result = await uploadFile(file, "media");
-      if (result?.url) {
-        const { data, error } = await supabase
-          .from("project_maps")
-          .insert({
-            project_id: projectId,
-            image_url: result.url,
-            name: newMapName,
-          })
-          .select();
+      // Direct upload to storage without using uploadFile function
+      const fileExt = file.name.split(".").pop();
+      const fileName = `map_${Math.random().toString(36).slice(2)}_${Date.now()}.${fileExt}`;
 
-        if (error) throw error;
+      const { error: uploadError } = await supabase.storage
+        .from("media")
+        .upload(fileName, file);
 
-        if (data?.[0]) {
-          setSelectedMapId(data[0].id);
-          setNewMapName("");
-          setIsAddingMap(false);
-          await loadMaps();
-        }
+      if (uploadError) throw uploadError;
+
+      const { data: urlData } = supabase.storage
+        .from("media")
+        .getPublicUrl(fileName);
+
+      const imageUrl = urlData.publicUrl;
+
+      // Create project map record
+      const { data, error } = await supabase
+        .from("project_maps")
+        .insert({
+          project_id: projectId,
+          image_url: imageUrl,
+          name: newMapName,
+        })
+        .select();
+
+      if (error) throw error;
+
+      if (data?.[0]) {
+        setSelectedMapId(data[0].id);
+        setNewMapName("");
+        setIsAddingMap(false);
+        await loadMaps();
       }
     } catch (error) {
       console.error("Error uploading map:", error);
@@ -197,10 +216,43 @@ const ProjectMapComponent: React.FC<ProjectMapProps> = ({ projectId }) => {
       description: area.description,
       color: area.color,
     });
+
+    // If we're in edit mode, set the editing area ID
+    if (isEditingPoints) {
+      setEditingAreaId(area.id);
+    }
+  };
+
+  const startEditingPoints = (area: Area) => {
+    setIsEditingPoints(true);
+    setEditingAreaId(area.id);
+    setSelectedArea(area);
+    setDrawingPoints(area.coordinates.points);
+    setNewArea({
+      name: area.name,
+      description: area.description,
+      color: area.color,
+    });
+  };
+
+  const stopEditingPoints = () => {
+    setIsEditingPoints(false);
+    setEditingAreaId(null);
+  };
+
+  const deletePoint = (index: number) => {
+    if (drawingPoints.length <= 3) {
+      alert("Cannot delete point. Area must have at least 3 points.");
+      return;
+    }
+
+    const newPoints = [...drawingPoints];
+    newPoints.splice(index, 1);
+    setDrawingPoints(newPoints);
   };
 
   const handleCanvasClick = (event: React.MouseEvent<SVGElement>) => {
-    if (!isAddingArea) return;
+    if (!isAddingArea && !isEditingPoints) return;
 
     const svg = svgRef.current;
     if (!svg) return;
@@ -209,7 +261,95 @@ const ProjectMapComponent: React.FC<ProjectMapProps> = ({ projectId }) => {
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
 
-    setDrawingPoints([...drawingPoints, [x, y]]);
+    if (isAddingArea) {
+      setDrawingPoints([...drawingPoints, [x, y]]);
+    } else if (isEditingPoints) {
+      // Add a new point between the closest two existing points
+      if (drawingPoints.length >= 2) {
+        let minDistance = Infinity;
+        let insertIndex = 0;
+
+        // Find the closest line segment to insert the new point
+        for (let i = 0; i < drawingPoints.length; i++) {
+          const nextIndex = (i + 1) % drawingPoints.length;
+          const p1 = drawingPoints[i];
+          const p2 = drawingPoints[nextIndex];
+
+          // Calculate distance from point to line segment
+          const distance = distanceToLineSegment(p1, p2, [x, y]);
+
+          if (distance < minDistance) {
+            minDistance = distance;
+            insertIndex = nextIndex;
+          }
+        }
+
+        // Insert the new point at the determined position
+        const newPoints = [...drawingPoints];
+        newPoints.splice(insertIndex, 0, [x, y]);
+        setDrawingPoints(newPoints);
+      }
+    }
+  };
+
+  // Helper function to calculate distance from point to line segment
+  const distanceToLineSegment = (
+    p1: [number, number],
+    p2: [number, number],
+    p: [number, number],
+  ): number => {
+    const [x1, y1] = p1;
+    const [x2, y2] = p2;
+    const [x, y] = p;
+
+    const A = x - x1;
+    const B = y - y1;
+    const C = x2 - x1;
+    const D = y2 - y1;
+
+    const dot = A * C + B * D;
+    const lenSq = C * C + D * D;
+    let param = -1;
+
+    if (lenSq !== 0) param = dot / lenSq;
+
+    let xx, yy;
+
+    if (param < 0) {
+      xx = x1;
+      yy = y1;
+    } else if (param > 1) {
+      xx = x2;
+      yy = y2;
+    } else {
+      xx = x1 + param * C;
+      yy = y1 + param * D;
+    }
+
+    const dx = x - xx;
+    const dy = y - yy;
+
+    return Math.sqrt(dx * dx + dy * dy);
+  };
+
+  const handlePointMouseDown = (index: number) => {
+    setDraggedPointIndex(index);
+  };
+
+  const handlePointMouseUp = () => {
+    setDraggedPointIndex(null);
+  };
+
+  const handlePointMouseMove = (event: React.MouseEvent<SVGElement>) => {
+    if (draggedPointIndex === null || !svgRef.current) return;
+
+    const rect = svgRef.current.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+
+    const newPoints = [...drawingPoints];
+    newPoints[draggedPointIndex] = [x, y];
+    setDrawingPoints(newPoints);
   };
 
   useEffect(() => {
@@ -268,7 +408,9 @@ const ProjectMapComponent: React.FC<ProjectMapProps> = ({ projectId }) => {
               width="800"
               height="600"
               onClick={handleCanvasClick}
-              className="cursor-crosshair"
+              onMouseMove={handlePointMouseMove}
+              onMouseUp={handlePointMouseUp}
+              className={`${isAddingArea || isEditingPoints ? "cursor-crosshair" : "cursor-default"}`}
             >
               {selectedMap?.image_url && (
                 <image
@@ -293,7 +435,7 @@ const ProjectMapComponent: React.FC<ProjectMapProps> = ({ projectId }) => {
                       .map((point) => point.join(","))
                       .join(" ")}
                     fill={area.color}
-                    fillOpacity="0.3"
+                    fillOpacity="0.6"
                     stroke={area.color}
                     strokeWidth="2"
                   />
@@ -306,38 +448,180 @@ const ProjectMapComponent: React.FC<ProjectMapProps> = ({ projectId }) => {
                   >
                     {index + 1}
                   </text>
+
+                  {/* Show points when in edit mode and this area is selected */}
+                  {isEditingPoints &&
+                    editingAreaId === area.id &&
+                    area.coordinates.points.map((point, pointIndex) => (
+                      <g key={`point-${pointIndex}`}>
+                        <circle
+                          cx={point[0]}
+                          cy={point[1]}
+                          r={6}
+                          fill="white"
+                          stroke={area.color}
+                          strokeWidth="2"
+                          onMouseDown={(e) => {
+                            e.stopPropagation();
+                            handlePointMouseDown(pointIndex);
+                          }}
+                          className="cursor-move"
+                        />
+                        <text
+                          x={point[0] + 10}
+                          y={point[1] - 10}
+                          fill="black"
+                          fontSize="10"
+                          className="pointer-events-none"
+                        >
+                          {pointIndex + 1}
+                        </text>
+                      </g>
+                    ))}
                 </g>
               ))}
 
               {drawingPoints.length > 0 && (
-                <polygon
-                  points={drawingPoints
-                    .map((point) => point.join(","))
-                    .join(" ")}
-                  fill={newArea.color}
-                  fillOpacity="0.3"
-                  stroke={newArea.color}
-                  strokeWidth="2"
-                />
+                <g>
+                  <polygon
+                    points={drawingPoints
+                      .map((point) => point.join(","))
+                      .join(" ")}
+                    fill={newArea.color}
+                    fillOpacity="0.6"
+                    stroke={newArea.color}
+                    strokeWidth="2"
+                  />
+
+                  {/* Show points when in edit mode */}
+                  {isEditingPoints &&
+                    drawingPoints.map((point, pointIndex) => (
+                      <g key={`editing-point-${pointIndex}`}>
+                        <circle
+                          cx={point[0]}
+                          cy={point[1]}
+                          r={6}
+                          fill="white"
+                          stroke={newArea.color}
+                          strokeWidth="2"
+                          onMouseDown={(e) => {
+                            e.stopPropagation();
+                            handlePointMouseDown(pointIndex);
+                          }}
+                          className="cursor-move"
+                        />
+                        <text
+                          x={point[0] + 10}
+                          y={point[1] - 10}
+                          fill="black"
+                          fontSize="10"
+                          className="pointer-events-none"
+                        >
+                          {pointIndex + 1}
+                        </text>
+                        {/* Delete point button */}
+                        <circle
+                          cx={point[0] - 10}
+                          cy={point[1] - 10}
+                          r={5}
+                          fill="red"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deletePoint(pointIndex);
+                          }}
+                          className="cursor-pointer"
+                        />
+                        <text
+                          x={point[0] - 10}
+                          y={point[1] - 10}
+                          fill="white"
+                          fontSize="10"
+                          textAnchor="middle"
+                          dominantBaseline="middle"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deletePoint(pointIndex);
+                          }}
+                          className="cursor-pointer"
+                        >
+                          x
+                        </text>
+                      </g>
+                    ))}
+                </g>
               )}
             </svg>
 
             <div className="absolute top-4 right-4 flex gap-2">
-              <Button
-                variant={isAddingArea ? "default" : "outline"}
-                onClick={() => {
-                  if (isAddingArea) {
-                    setIsAddingArea(false);
-                    setDrawingPoints([]);
-                  } else {
-                    setIsAddingArea(true);
-                    setSelectedArea(null);
-                  }
-                }}
-              >
-                {isAddingArea ? "Cancel" : "Add Area"}
-              </Button>
-              {drawingPoints.length >= 3 && (
+              {!isEditingPoints && (
+                <Button
+                  variant={isAddingArea ? "default" : "outline"}
+                  onClick={() => {
+                    if (isAddingArea) {
+                      setIsAddingArea(false);
+                      setDrawingPoints([]);
+                    } else {
+                      setIsAddingArea(true);
+                      setSelectedArea(null);
+                      setIsEditingPoints(false);
+                      setEditingAreaId(null);
+                    }
+                  }}
+                >
+                  {isAddingArea ? "Cancel" : "Add Area"}
+                </Button>
+              )}
+
+              {selectedArea && !isAddingArea && !isEditingPoints && (
+                <Button
+                  variant="outline"
+                  onClick={() => startEditingPoints(selectedArea)}
+                >
+                  Edit Points
+                </Button>
+              )}
+
+              {isEditingPoints && (
+                <>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      // Click anywhere to add a new point
+                      alert(
+                        "Click on the map to add a new point between existing points",
+                      );
+                    }}
+                  >
+                    Add Point
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={() => {
+                      stopEditingPoints();
+                      // Reset to original points if needed
+                      if (selectedArea) {
+                        setDrawingPoints(selectedArea.coordinates.points);
+                      }
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={async () => {
+                      if (drawingPoints.length < 3) {
+                        alert("Area must have at least 3 points");
+                        return;
+                      }
+                      await handleSaveArea();
+                      stopEditingPoints();
+                    }}
+                  >
+                    Save Changes
+                  </Button>
+                </>
+              )}
+
+              {isAddingArea && drawingPoints.length >= 3 && (
                 <Button onClick={() => setIsAddingArea(false)}>Done</Button>
               )}
             </div>
@@ -428,17 +712,29 @@ const ProjectMapComponent: React.FC<ProjectMapProps> = ({ projectId }) => {
                         />
                         <h4 className="font-medium">{area.name}</h4>
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="hover:bg-destructive hover:text-destructive-foreground"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteArea(area.id);
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      <div className="flex gap-1">
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            startEditingPoints(area);
+                          }}
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="hover:bg-destructive hover:text-destructive-foreground"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteArea(area.id);
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
                     {area.description && (
                       <p className="text-sm text-gray-600 mt-1">

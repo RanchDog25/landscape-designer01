@@ -8,6 +8,7 @@ import { FolderOpen, Plus, Trash2 } from "lucide-react";
 import { AddProjectDialog } from "./AddProjectDialog";
 import { DeleteProjectDialog } from "./DeleteProjectDialog";
 import { supabase } from "@/lib/supabase";
+import { getCurrentUser } from "@/lib/auth";
 
 interface Project {
   id: string;
@@ -37,12 +38,34 @@ const ProjectList: React.FC<ProjectListProps> = ({
     name: string;
   } | null>(null);
 
+  const currentUser = getCurrentUser();
+
   const loadProjects = async () => {
-    const { data, error } = await supabase
+    if (!currentUser) return;
+
+    let query = supabase
       .from("projects")
       .select("*")
       .is("deleted_at", null)
       .order("created_at", { ascending: false });
+
+    // If not admin, only show assigned projects
+    if (currentUser.role !== "admin") {
+      const { data: userProjects } = await supabase
+        .from("user_projects")
+        .select("project_id")
+        .eq("user_id", currentUser.id);
+
+      const projectIds = userProjects?.map((up) => up.project_id) || [];
+      if (projectIds.length > 0) {
+        query = query.in("id", projectIds);
+      } else {
+        setProjects([]);
+        return;
+      }
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       console.error("Error loading projects:", error);
@@ -88,14 +111,14 @@ const ProjectList: React.FC<ProjectListProps> = ({
     }
   };
 
+  const canAddProjects = currentUser?.role === "admin";
+
   return (
     <div className="w-[280px] h-full bg-white border-r flex flex-col">
       <div className="p-4 border-b">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-semibold">
-            {userType === "landscaper" ? "Projects" : "My Project"}
-          </h2>
-          {userType === "landscaper" && (
+          <h2 className="text-xl font-semibold">Projects</h2>
+          {canAddProjects && (
             <Button
               size="sm"
               variant="outline"
@@ -106,18 +129,16 @@ const ProjectList: React.FC<ProjectListProps> = ({
             </Button>
           )}
         </div>
-        {userType === "landscaper" && (
-          <div className="relative">
-            <FolderOpen className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-            <input
-              type="text"
-              placeholder="Search projects..."
-              className="w-full pl-10 pr-4 py-2 border rounded-md text-sm"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </div>
-        )}
+        <div className="relative">
+          <FolderOpen className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+          <input
+            type="text"
+            placeholder="Search projects..."
+            className="w-full pl-10 pr-4 py-2 border rounded-md text-sm"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+        </div>
       </div>
 
       <ScrollArea className="flex-1">
@@ -148,7 +169,7 @@ const ProjectList: React.FC<ProjectListProps> = ({
                     </p>
                   </div>
                 </div>
-                {userType === "landscaper" && (
+                {canAddProjects && (
                   <Button
                     variant="ghost"
                     size="icon"

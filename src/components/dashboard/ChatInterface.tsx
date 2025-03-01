@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { useAuth } from "../auth/AuthProvider";
+import { getCurrentUser } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
@@ -13,9 +13,9 @@ interface Message {
   id: string;
   content: string;
   created_at: string;
-  user_id: string;
-  user_name?: string;
+  user_name: string;
   user_avatar?: string;
+  project_id: string;
 }
 
 interface ChatInterfaceProps {
@@ -25,11 +25,14 @@ interface ChatInterfaceProps {
 const ChatInterface: React.FC<ChatInterfaceProps> = ({ projectId }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
-  const { user } = useAuth();
+  const user = getCurrentUser();
   const scrollAreaRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!projectId) return;
+    if (!projectId) {
+      setMessages([]);
+      return;
+    }
 
     loadMessages();
 
@@ -92,7 +95,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ projectId }) => {
     event: React.ChangeEvent<HTMLInputElement>,
   ) => {
     const files = event.target.files;
-    if (!files || files.length === 0 || !user?.id) return;
+    if (!files || files.length === 0 || !user?.id || !projectId) return;
 
     try {
       const file = files[0];
@@ -123,9 +126,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ projectId }) => {
     try {
       const { error } = await supabase.from("messages").insert({
         project_id: projectId,
-        user_id: user.id,
         content: content,
-        created_at: new Date().toISOString(),
+        user_name: user.username,
+        user_avatar:
+          user.avatar_url ||
+          `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`,
       });
 
       if (error) {
@@ -145,6 +150,16 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ projectId }) => {
       handleSendMessage();
     }
   };
+
+  if (!projectId) {
+    return (
+      <div className="flex items-center justify-center h-full bg-background">
+        <p className="text-muted-foreground">
+          Select a project to start chatting
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full bg-background border rounded-lg">
@@ -178,7 +193,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ projectId }) => {
             onKeyDown={handleKeyPress}
             className="flex-1"
           />
-          <Button onClick={handleSendMessage} className="shrink-0">
+          <Button onClick={() => handleSendMessage()} className="shrink-0">
             <Send className="h-5 w-5" />
           </Button>
         </div>
@@ -188,19 +203,19 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ projectId }) => {
       <div className="flex-1 overflow-hidden min-h-0">
         <ScrollArea className="h-full" ref={scrollAreaRef}>
           <div className="p-4 flex flex-col-reverse gap-4">
-            {[...messages].reverse().map((message) => (
+            {[...messages].map((message) => (
               <div
                 key={message.id}
-                className={`flex ${message.user_id === user?.id ? "justify-end" : "justify-start"}`}
+                className={`flex ${message.user_name === user?.username ? "justify-end" : "justify-start"}`}
               >
                 <div
-                  className={`flex ${message.user_id === user?.id ? "flex-row-reverse" : "flex-row"} items-start gap-2 max-w-[80%]`}
+                  className={`flex ${message.user_name === user?.username ? "flex-row-reverse" : "flex-row"} items-start gap-2 max-w-[80%]`}
                 >
                   <Avatar className="w-8 h-8">
                     <AvatarImage
                       src={
                         message.user_avatar ||
-                        `https://api.dicebear.com/7.x/avataaars/svg?seed=${message.user_id}`
+                        `https://api.dicebear.com/7.x/avataaars/svg?seed=${message.user_name}`
                       }
                       alt={message.user_name || "User"}
                     />
@@ -209,7 +224,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ projectId }) => {
                     </AvatarFallback>
                   </Avatar>
                   <Card
-                    className={`p-3 ${message.user_id === user?.id ? "bg-primary text-primary-foreground" : "bg-muted"}`}
+                    className={`p-3 ${message.user_name === user?.username ? "bg-primary text-primary-foreground" : "bg-muted"}`}
                   >
                     <div className="flex flex-col">
                       <span className="text-sm font-medium">

@@ -1,53 +1,36 @@
-import { Suspense } from "react";
-import { useRoutes, Routes, Route, Navigate } from "react-router-dom";
+import { Suspense, useEffect } from "react";
+import { Routes, Route, useNavigate } from "react-router-dom";
 import Home from "./components/home";
-import LoginForm from "./components/auth/LoginForm";
-import { AuthProvider, useAuth } from "./components/auth/AuthProvider";
-import { ProfileForm } from "./components/profile/ProfileForm";
-import routes from "tempo-routes";
-
-function PrivateRoute({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
-
-  if (loading) {
-    return <div>Loading...</div>;
-  }
-
-  if (!user) {
-    return <Navigate to="/login" />;
-  }
-
-  return <>{children}</>;
-}
+import LoginPage from "./components/auth/LoginPage";
+import RegisterPage from "./components/auth/RegisterPage";
+import AdminPage from "./components/admin/AdminPage";
+import { getCurrentUser } from "./lib/auth";
 
 function App() {
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const user = getCurrentUser();
+    if (!user && window.location.pathname !== "/register") {
+      navigate("/login");
+    }
+  }, [navigate]);
+
   return (
-    <AuthProvider>
-      <Suspense fallback={<p>Loading...</p>}>
-        <>
-          <Routes>
-            <Route path="/login" element={<LoginForm />} />
-            <Route
-              path="/profile"
-              element={
-                <PrivateRoute>
-                  <ProfileForm />
-                </PrivateRoute>
-              }
-            />
-            <Route
-              path="/"
-              element={
-                <PrivateRoute>
-                  <Home />
-                </PrivateRoute>
-              }
-            />
-          </Routes>
-          {import.meta.env.VITE_TEMPO === "true" && useRoutes(routes)}
-        </>
-      </Suspense>
-    </AuthProvider>
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center min-h-screen">
+          Loading...
+        </div>
+      }
+    >
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
+        <Route path="/admin" element={<AdminPage />} />
+      </Routes>
+    </Suspense>
   );
 }
 

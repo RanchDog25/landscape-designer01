@@ -11,7 +11,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/lib/supabase";
-import { useAuth } from "../auth/AuthProvider";
 
 interface AddProjectDialogProps {
   open: boolean;
@@ -24,23 +23,19 @@ export function AddProjectDialog({
   onOpenChange,
   onSuccess,
 }: AddProjectDialogProps) {
-  const { user } = useAuth();
   const [name, setName] = React.useState("");
   const [location, setLocation] = React.useState("");
   const [loading, setLoading] = React.useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return;
-
     setLoading(true);
+
     try {
       const { error } = await supabase.from("projects").insert({
         name: `${name} - ${location}`,
         status: "active",
-        landscaper_id: user.id,
         created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
       });
 
       if (error) throw error;
