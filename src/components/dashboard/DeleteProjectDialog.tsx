@@ -9,6 +9,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { supabase } from "@/lib/supabase";
 
 interface DeleteProjectDialogProps {
@@ -26,7 +28,12 @@ export function DeleteProjectDialog({
   projectName,
   onSuccess,
 }: DeleteProjectDialogProps) {
+  const [confirmText, setConfirmText] = React.useState("");
+  const isConfirmed = confirmText === "delete";
+
   const handleDelete = async () => {
+    if (!isConfirmed) return;
+
     try {
       const { error } = await supabase
         .from("projects")
@@ -35,6 +42,7 @@ export function DeleteProjectDialog({
 
       if (error) throw error;
       onOpenChange(false);
+      setConfirmText("");
       onSuccess?.();
     } catch (error) {
       console.error("Error deleting project:", error);
@@ -51,11 +59,28 @@ export function DeleteProjectDialog({
             hide the project but preserve all associated data.
           </AlertDialogDescription>
         </AlertDialogHeader>
+
+        <div className="py-4">
+          <Label htmlFor="confirm-delete" className="text-sm font-medium">
+            Type "delete" to confirm
+          </Label>
+          <Input
+            id="confirm-delete"
+            value={confirmText}
+            onChange={(e) => setConfirmText(e.target.value)}
+            placeholder="delete"
+            className="mt-2"
+          />
+        </div>
+
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogCancel onClick={() => setConfirmText("")}>
+            Cancel
+          </AlertDialogCancel>
           <AlertDialogAction
             onClick={handleDelete}
             className="bg-destructive text-destructive-foreground"
+            disabled={!isConfirmed}
           >
             Delete
           </AlertDialogAction>

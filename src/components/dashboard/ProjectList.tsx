@@ -4,20 +4,25 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { FolderOpen, Plus, Trash2 } from "lucide-react";
+import { FolderOpen, Plus, Trash2, Edit, Layers } from "lucide-react";
 import { AddProjectDialog } from "./AddProjectDialog";
 import { DeleteProjectDialog } from "./DeleteProjectDialog";
+import { EditProjectDialog } from "./EditProjectDialog";
 import { supabase } from "@/lib/supabase";
 import { getCurrentUser } from "@/lib/auth";
 
 interface Project {
   id: string;
   name: string;
+  description?: string;
   status: "active" | "pending" | "completed";
   created_at: string;
   updated_at: string;
   deleted_at?: string | null;
 }
+
+// Special ID to represent all projects
+export const ALL_PROJECTS_ID = "all";
 
 interface ProjectListProps {
   selectedProjectId?: string;
@@ -36,6 +41,11 @@ const ProjectList: React.FC<ProjectListProps> = ({
   const [deleteProject, setDeleteProject] = useState<{
     id: string;
     name: string;
+  } | null>(null);
+  const [editProject, setEditProject] = useState<{
+    id: string;
+    name: string;
+    description?: string;
   } | null>(null);
 
   const currentUser = getCurrentUser();
@@ -143,6 +153,31 @@ const ProjectList: React.FC<ProjectListProps> = ({
 
       <ScrollArea className="flex-1">
         <div className="p-2 space-y-2">
+          {/* All Projects Card */}
+          <Card
+            key="all-projects"
+            className={`p-3 cursor-pointer hover:bg-gray-50 transition-colors group border-2 ${
+              selectedProjectId === ALL_PROJECTS_ID
+                ? "border-primary bg-primary/5"
+                : "border-dashed border-gray-300"
+            }`}
+            onClick={() => onProjectSelect(ALL_PROJECTS_ID)}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <Avatar className="h-10 w-10 bg-primary text-primary-foreground">
+                  <Layers className="h-5 w-5" />
+                </Avatar>
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-sm font-medium truncate">All Projects</h3>
+                  <p className="text-xs text-gray-600 truncate">
+                    View data across all projects
+                  </p>
+                </div>
+              </div>
+            </div>
+          </Card>
+
           {filteredProjects.map((project) => (
             <Card
               key={project.id}
@@ -151,42 +186,68 @@ const ProjectList: React.FC<ProjectListProps> = ({
               }`}
               onClick={() => onProjectSelect(project.id)}
             >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-3">
-                  <Avatar className="h-10 w-10">
-                    <img
-                      src={`https://api.dicebear.com/7.x/initials/svg?seed=${project.name}`}
-                      alt={project.name}
-                      className="rounded-full"
-                    />
-                  </Avatar>
-                  <div className="flex-1 min-w-0">
-                    <h3 className="text-sm font-medium truncate">
-                      {project.name}
-                    </h3>
-                    <p className="text-xs text-gray-500">
-                      {new Date(project.created_at).toLocaleDateString()}
-                    </p>
+              <div className="flex flex-col">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
+                    <Avatar className="h-10 w-10 flex-shrink-0">
+                      <img
+                        src={`https://api.dicebear.com/7.x/initials/svg?seed=${project.name}`}
+                        alt={project.name}
+                        className="rounded-full"
+                      />
+                    </Avatar>
+                    <div className="min-w-0 max-w-[150px]">
+                      <h3 className="text-sm font-medium truncate">
+                        {project.name}
+                      </h3>
+                      {project.description && (
+                        <p className="text-xs text-gray-600 truncate">
+                          {project.description}
+                        </p>
+                      )}
+                      <p className="text-xs text-gray-500">
+                        {new Date(project.created_at).toLocaleDateString()}
+                      </p>
+                    </div>
                   </div>
                 </div>
-                {canAddProjects && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="ml-2 opacity-0 group-hover:opacity-100 hover:bg-destructive hover:text-destructive-foreground"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setDeleteProject({ id: project.id, name: project.name });
-                    }}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                )}
-              </div>
-              <div className="mt-2 flex items-center justify-between">
-                <Badge className={getStatusColor(project.status || "active")}>
-                  {project.status || "active"}
-                </Badge>
+                <div className="flex mt-2 justify-between items-center">
+                  <Badge className={getStatusColor(project.status || "active")}>
+                    {project.status || "active"}
+                  </Badge>
+                  <div className="flex">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="mr-1"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditProject({
+                          id: project.id,
+                          name: project.name,
+                          description: project.description,
+                        });
+                      }}
+                    >
+                      <Edit className="h-4 w-4" />
+                    </Button>
+                    {canAddProjects && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDeleteProject({
+                            id: project.id,
+                            name: project.name,
+                          });
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
               </div>
             </Card>
           ))}
@@ -208,6 +269,13 @@ const ProjectList: React.FC<ProjectListProps> = ({
           onSuccess={loadProjects}
         />
       )}
+
+      <EditProjectDialog
+        open={!!editProject}
+        onOpenChange={() => setEditProject(null)}
+        project={editProject}
+        onSuccess={loadProjects}
+      />
     </div>
   );
 };

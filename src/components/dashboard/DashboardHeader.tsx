@@ -9,8 +9,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
-import { Bell, LogOut, Settings, User, MessageCircle } from "lucide-react";
+import { LogOut, Settings, MessageCircle } from "lucide-react";
 import ChatButton from "./ChatButton";
+import ActivityFeed from "./ActivityFeed";
 import { getCurrentUser } from "@/lib/auth";
 import { useNavigate } from "react-router-dom";
 
@@ -37,6 +38,12 @@ const DashboardHeader: React.FC<DashboardHeaderProps> = ({
   return (
     <header className="w-full h-[72px] px-6 border-b bg-white flex items-center justify-between">
       <div className="flex items-center gap-4">
+        <img
+          src="/evergold-logo.svg"
+          alt="Evergold Landscaping"
+          className="h-12 mr-4"
+        />
+        <ActivityFeed projectId={projectId} />
         {user?.role === "admin" && (
           <Button variant="outline" onClick={() => navigate("/admin")}>
             Admin Dashboard

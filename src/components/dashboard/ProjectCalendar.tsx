@@ -40,15 +40,20 @@ interface ProjectEvent {
   status: "pending" | "in_progress" | "completed" | "cancelled";
   created_by?: string;
   project_id?: string;
+  project_name?: string;
 }
 
 interface ProjectCalendarProps {
   projectId?: string;
+  isAllProjects?: boolean;
 }
 
 type ViewMode = "day" | "week" | "month" | "year";
 
-const ProjectCalendar: React.FC<ProjectCalendarProps> = ({ projectId }) => {
+const ProjectCalendar: React.FC<ProjectCalendarProps> = ({
+  projectId,
+  isAllProjects = false,
+}) => {
   const [events, setEvents] = React.useState<ProjectEvent[]>([]);
   const [selectedDate, setSelectedDate] = React.useState<Date>(new Date());
   const [isAddEventOpen, setIsAddEventOpen] = React.useState(false);
@@ -58,17 +63,45 @@ const ProjectCalendar: React.FC<ProjectCalendarProps> = ({ projectId }) => {
     title: string;
   } | null>(null);
 
+  // State for project selection when in All Projects view
+  const [selectedProjectForEvent, setSelectedProjectForEvent] =
+    React.useState<string>("");
+  const [projects, setProjects] = React.useState<
+    { id: string; name: string }[]
+  >([]);
+
+  // Load projects for the dropdown
+  React.useEffect(() => {
+    if (isAllProjects) {
+      const loadProjects = async () => {
+        const { data } = await supabase
+          .from("projects")
+          .select("id, name")
+          .is("deleted_at", null)
+          .order("name");
+
+        setProjects(data || []);
+        if (data && data.length > 0) {
+          setSelectedProjectForEvent(data[0].id);
+        }
+      };
+
+      loadProjects();
+    }
+  }, [isAllProjects]);
+
   const loadEvents = async () => {
-    if (!projectId) {
-      setEvents([]);
-      return;
+    let query = supabase
+      .from("calendar_events")
+      .select("*, projects(name)")
+      .order("start_date", { ascending: true });
+
+    // Only filter by project if not in "All Projects" view
+    if (!isAllProjects && projectId) {
+      query = query.eq("project_id", projectId);
     }
 
-    const { data, error } = await supabase
-      .from("calendar_events")
-      .select("*")
-      .eq("project_id", projectId)
-      .order("start_date", { ascending: true });
+    const { data, error } = await query;
 
     if (error) {
       console.error("Error loading events:", error);
@@ -87,6 +120,7 @@ const ProjectCalendar: React.FC<ProjectCalendarProps> = ({ projectId }) => {
         status: event.status || "pending",
         created_by: event.created_by,
         project_id: event.project_id,
+        project_name: event.projects?.name,
       })),
     );
   };
@@ -94,28 +128,49 @@ const ProjectCalendar: React.FC<ProjectCalendarProps> = ({ projectId }) => {
   React.useEffect(() => {
     loadEvents();
 
-    if (!projectId) return;
+    let channel;
 
-    const channel = supabase
-      .channel(`calendar_events_${projectId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "calendar_events",
-          filter: `project_id=eq.${projectId}`,
-        },
-        () => {
-          loadEvents();
-        },
-      )
-      .subscribe();
+    if (isAllProjects) {
+      // Subscribe to all calendar events
+      channel = supabase
+        .channel(`calendar_events_all`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "calendar_events",
+          },
+          () => {
+            loadEvents();
+          },
+        )
+        .subscribe();
+    } else if (projectId) {
+      // Subscribe to project-specific events
+      channel = supabase
+        .channel(`calendar_events_${projectId}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "calendar_events",
+            filter: `project_id=eq.${projectId}`,
+          },
+          () => {
+            loadEvents();
+          },
+        )
+        .subscribe();
+    }
 
     return () => {
-      supabase.removeChannel(channel);
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
     };
-  }, [projectId]);
+  }, [projectId, isAllProjects]);
 
   const handleAddEvent = async (event: {
     title: string;
@@ -124,11 +179,13 @@ const ProjectCalendar: React.FC<ProjectCalendarProps> = ({ projectId }) => {
     type: "milestone" | "task" | "meeting";
     duration: "all-day" | "half-day";
   }) => {
-    if (!projectId) return;
+    // Determine which project ID to use
+    const targetProjectId = isAllProjects ? selectedProjectForEvent : projectId;
+    if (!targetProjectId) return;
 
     try {
       const { error } = await supabase.from("calendar_events").insert({
-        project_id: projectId,
+        project_id: targetProjectId,
         title: event.title,
         description: event.description,
         start_date: event.date.toISOString(),
@@ -180,25 +237,30 @@ const ProjectCalendar: React.FC<ProjectCalendarProps> = ({ projectId }) => {
     );
   };
 
-  if (!projectId) {
-    return (
-      <div className="flex items-center justify-center h-full bg-background">
-        <p className="text-muted-foreground">
-          Select a project to view calendar
-        </p>
-      </div>
-    );
-  }
-
   return (
     <div className="flex h-full bg-background">
       <div className="flex-1 p-6">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-semibold">Project Calendar</h2>
-          <Button onClick={() => setIsAddEventOpen(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            Add Event
-          </Button>
+          <div className="flex items-center gap-2">
+            {isAllProjects && (
+              <select
+                className="p-2 border rounded"
+                value={selectedProjectForEvent}
+                onChange={(e) => setSelectedProjectForEvent(e.target.value)}
+              >
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            <Button onClick={() => setIsAddEventOpen(true)}>
+              <Plus className="h-4 w-4 mr-2" />
+              Add Event
+            </Button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-[1fr,300px] gap-6">
@@ -228,6 +290,11 @@ const ProjectCalendar: React.FC<ProjectCalendarProps> = ({ projectId }) => {
                         <div className="flex gap-2 mt-2">
                           <Badge variant="secondary">{event.type}</Badge>
                           <Badge variant="outline">{event.duration}</Badge>
+                          {isAllProjects && event.project_name && (
+                            <Badge variant="outline" className="bg-primary/10">
+                              {event.project_name}
+                            </Badge>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center gap-2">

@@ -5,6 +5,8 @@ import ChatInterface from "./ChatInterface";
 import ProjectCalendar from "./ProjectCalendar";
 import ProjectMap from "./ProjectMap";
 import DocumentManager from "./DocumentManager";
+import { ALL_PROJECTS_ID } from "./ProjectList";
+import { Info } from "lucide-react";
 
 interface MainContentProps {
   activeTab?: string;
@@ -30,22 +32,51 @@ const MainContent: React.FC<MainContentProps> = ({
     );
   }
 
+  const isAllProjects = selectedProjectId === ALL_PROJECTS_ID;
+
   return (
     <div className="flex flex-col w-full h-full bg-gray-50">
       <NavigationTabs activeTab={activeTab} onTabChange={onTabChange} />
+
+      {isAllProjects && (
+        <div className="bg-primary/10 px-4 py-2 mx-4 mt-4 rounded-md flex items-center">
+          <Info className="h-4 w-4 mr-2 text-primary" />
+          <p className="text-sm">Viewing data across all projects</p>
+        </div>
+      )}
+
       <div className="flex-1 overflow-hidden">
         {activeTab === "ideaBoards" && (
-          <IdeaBoards projectId={selectedProjectId} />
+          <IdeaBoards
+            projectId={isAllProjects ? undefined : selectedProjectId}
+            isAllProjects={isAllProjects}
+            key={`ideaboards-${selectedProjectId}`}
+          />
         )}
         {activeTab === "chat" && (
-          <ChatInterface projectId={selectedProjectId} />
+          <ChatInterface
+            projectId={isAllProjects ? undefined : selectedProjectId}
+            isAllProjects={isAllProjects}
+          />
         )}
         {activeTab === "calendar" && (
-          <ProjectCalendar projectId={selectedProjectId} />
+          <ProjectCalendar
+            projectId={isAllProjects ? undefined : selectedProjectId}
+            isAllProjects={isAllProjects}
+          />
         )}
-        {activeTab === "map" && <ProjectMap projectId={selectedProjectId} />}
+        {activeTab === "map" && (
+          <ProjectMap
+            projectId={isAllProjects ? undefined : selectedProjectId}
+            isAllProjects={isAllProjects}
+            key={`map-${selectedProjectId}`}
+          />
+        )}
         {activeTab === "documents" && (
-          <DocumentManager projectId={selectedProjectId} />
+          <DocumentManager
+            projectId={isAllProjects ? undefined : selectedProjectId}
+            isAllProjects={isAllProjects}
+          />
         )}
       </div>
     </div>

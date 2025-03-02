@@ -31,9 +31,13 @@ interface ProjectMap {
 
 interface ProjectMapProps {
   projectId?: string;
+  isAllProjects?: boolean;
 }
 
-const ProjectMapComponent: React.FC<ProjectMapProps> = ({ projectId }) => {
+const ProjectMapComponent: React.FC<ProjectMapProps> = ({
+  projectId,
+  isAllProjects = false,
+}) => {
   const [maps, setMaps] = useState<ProjectMap[]>([]);
   const [selectedMapId, setSelectedMapId] = useState<string>();
   const [areas, setAreas] = useState<Area[]>([]);
@@ -57,14 +61,48 @@ const ProjectMapComponent: React.FC<ProjectMapProps> = ({ projectId }) => {
     null,
   );
 
-  if (!projectId) return null;
+  // State for project selection when in All Projects view
+  const [selectedProjectForMap, setSelectedProjectForMap] =
+    useState<string>("");
+  const [projectsList, setProjectsList] = useState<
+    { id: string; name: string }[]
+  >([]);
+
+  // Load projects for the dropdown
+  useEffect(() => {
+    if (isAllProjects) {
+      const loadProjects = async () => {
+        const { data } = await supabase
+          .from("projects")
+          .select("id, name")
+          .is("deleted_at", null)
+          .order("name");
+
+        setProjectsList(data || []);
+        if (data && data.length > 0) {
+          setSelectedProjectForMap(data[0].id);
+        }
+      };
+
+      loadProjects();
+    }
+  }, [isAllProjects]);
 
   const loadMaps = async () => {
-    const { data, error } = await supabase
+    // Clear maps first to prevent stale data
+    setMaps([]);
+
+    let query = supabase
       .from("project_maps")
-      .select("*")
-      .eq("project_id", projectId)
+      .select("*, projects(name)")
       .order("name");
+
+    // Only filter by project if not in "All Projects" view
+    if (!isAllProjects && projectId) {
+      query = query.eq("project_id", projectId);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       console.error("Error loading maps:", error);
@@ -72,7 +110,7 @@ const ProjectMapComponent: React.FC<ProjectMapProps> = ({ projectId }) => {
     }
 
     setMaps(data || []);
-    if (data?.length && !selectedMapId) {
+    if (data?.length) {
       setSelectedMapId(data[0].id);
     }
   };
@@ -81,6 +119,9 @@ const ProjectMapComponent: React.FC<ProjectMapProps> = ({ projectId }) => {
     if (!selectedMapId) return;
 
     try {
+      // First clear existing areas to prevent stale data
+      setAreas([]);
+
       const { data, error } = await supabase
         .from("project_areas")
         .select("*")
@@ -91,6 +132,8 @@ const ProjectMapComponent: React.FC<ProjectMapProps> = ({ projectId }) => {
         return;
       }
 
+      // Only set areas if we're still on the same map
+      // This prevents race conditions when switching maps quickly
       setAreas(data || []);
     } catch (error) {
       console.error("Error loading areas:", error);
@@ -105,6 +148,13 @@ const ProjectMapComponent: React.FC<ProjectMapProps> = ({ projectId }) => {
 
     if (!file.type.startsWith("image/")) {
       alert("Please upload an image file");
+      return;
+    }
+
+    // Determine which project ID to use
+    const targetProjectId = isAllProjects ? selectedProjectForMap : projectId;
+    if (!targetProjectId) {
+      alert("Please select a project");
       return;
     }
 
@@ -130,7 +180,7 @@ const ProjectMapComponent: React.FC<ProjectMapProps> = ({ projectId }) => {
       const { data, error } = await supabase
         .from("project_maps")
         .insert({
-          project_id: projectId,
+          project_id: targetProjectId,
           image_url: imageUrl,
           name: newMapName,
         })
@@ -354,11 +404,23 @@ const ProjectMapComponent: React.FC<ProjectMapProps> = ({ projectId }) => {
 
   useEffect(() => {
     loadMaps();
+    // Reset areas and selected map when project changes
+    setAreas([]);
+    setSelectedMapId(undefined);
+    setSelectedArea(null);
+    setDrawingPoints([]);
+    setIsAddingArea(false);
+    setIsEditingPoints(false);
+    setEditingAreaId(null);
   }, [projectId]);
 
   useEffect(() => {
-    loadAreas();
-  }, [selectedMapId]);
+    if (selectedMapId) {
+      loadAreas();
+    } else {
+      setAreas([]);
+    }
+  }, [selectedMapId, projectId]);
 
   const selectedMap = maps.find((m) => m.id === selectedMapId);
 
@@ -371,17 +433,34 @@ const ProjectMapComponent: React.FC<ProjectMapProps> = ({ projectId }) => {
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-4">
               <h2 className="text-2xl font-semibold">Project Maps</h2>
-              <select
-                className="border rounded-md px-3 py-1"
-                value={selectedMapId}
-                onChange={(e) => setSelectedMapId(e.target.value)}
-              >
-                {maps.map((map) => (
-                  <option key={map.id} value={map.id}>
-                    {map.name}
-                  </option>
-                ))}
-              </select>
+              <div className="flex items-center gap-2">
+                <select
+                  className="border rounded-md px-3 py-1"
+                  value={selectedMapId}
+                  onChange={(e) => setSelectedMapId(e.target.value)}
+                >
+                  {maps.map((map) => (
+                    <option key={map.id} value={map.id}>
+                      {map.name}{" "}
+                      {map.projects?.name ? `(${map.projects.name})` : ""}
+                    </option>
+                  ))}
+                </select>
+
+                {isAllProjects && (
+                  <select
+                    className="border rounded-md px-3 py-1"
+                    value={selectedProjectForMap}
+                    onChange={(e) => setSelectedProjectForMap(e.target.value)}
+                  >
+                    {projectsList.map((project) => (
+                      <option key={project.id} value={project.id}>
+                        {project.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
               <Button variant="outline" onClick={() => setIsAddingMap(true)}>
                 <Plus className="h-4 w-4 mr-2" />
                 Add New Map

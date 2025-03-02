@@ -26,9 +26,13 @@ type Document = Database["public"]["Tables"]["documents"]["Row"];
 
 interface DocumentManagerProps {
   projectId?: string;
+  isAllProjects?: boolean;
 }
 
-const DocumentManager = ({ projectId }: DocumentManagerProps) => {
+const DocumentManager = ({
+  projectId,
+  isAllProjects = false,
+}: DocumentManagerProps) => {
   const [activeTab, setActiveTab] = useState<"technical" | "business">(
     "technical",
   );
@@ -39,10 +43,17 @@ const DocumentManager = ({ projectId }: DocumentManagerProps) => {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const loadDocuments = async () => {
-    const { data, error } = await supabase
+    let query = supabase
       .from("documents")
-      .select("*")
+      .select("*, projects(name)")
       .eq("type", activeTab);
+
+    // Only filter by project if not in "All Projects" view and a project is selected
+    if (!isAllProjects && projectId) {
+      query = query.eq("project_id", projectId);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       console.error("Error loading documents:", error);
@@ -56,16 +67,44 @@ const DocumentManager = ({ projectId }: DocumentManagerProps) => {
     loadDocuments();
   }, [activeTab]);
 
+  // State for project selection when in All Projects view
+  const [selectedProjectForDoc, setSelectedProjectForDoc] =
+    useState<string>("");
+  const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
+
+  // Load projects for the dropdown
+  useEffect(() => {
+    if (isAllProjects) {
+      const loadProjects = async () => {
+        const { data } = await supabase
+          .from("projects")
+          .select("id, name")
+          .is("deleted_at", null)
+          .order("name");
+
+        setProjects(data || []);
+        if (data && data.length > 0) {
+          setSelectedProjectForDoc(data[0].id);
+        }
+      };
+
+      loadProjects();
+    }
+  }, [isAllProjects]);
+
   const handleFileUpload = async (
     event: React.ChangeEvent<HTMLInputElement>,
   ) => {
     const files = event.target.files;
     if (!files || files.length === 0) return;
 
+    // Determine which project ID to use
+    const targetProjectId = isAllProjects ? selectedProjectForDoc : projectId;
+
     setIsUploading(true);
     try {
       const file = files[0];
-      await uploadFile(file, "documents", undefined, {
+      await uploadFile(file, "documents", targetProjectId, {
         title: file.name,
         type: activeTab,
       });
@@ -126,6 +165,11 @@ const DocumentManager = ({ projectId }: DocumentManagerProps) => {
                   <p className="text-sm text-gray-500">
                     {new Date(doc.created_at || "").toLocaleDateString()} •{" "}
                     {formatFileSize(doc.size_bytes || 0)}
+                    {isAllProjects && doc.projects?.name && (
+                      <span className="ml-2 text-xs bg-primary/10 px-2 py-0.5 rounded">
+                        {doc.projects.name}
+                      </span>
+                    )}
                   </p>
                 </div>
               </div>
@@ -167,17 +211,32 @@ const DocumentManager = ({ projectId }: DocumentManagerProps) => {
             className="hidden"
             accept=".pdf,.doc,.docx,.xls,.xlsx,.txt"
           />
-          <Button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isUploading}
-          >
-            {isUploading ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <Upload className="h-4 w-4 mr-2" />
+          <div className="flex items-center gap-2">
+            {isAllProjects && (
+              <select
+                className="border rounded-md px-3 py-1"
+                value={selectedProjectForDoc}
+                onChange={(e) => setSelectedProjectForDoc(e.target.value)}
+              >
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
             )}
-            {isUploading ? "Uploading..." : "Upload Document"}
-          </Button>
+            <Button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploading}
+            >
+              {isUploading ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Upload className="h-4 w-4 mr-2" />
+              )}
+              {isUploading ? "Uploading..." : "Upload Document"}
+            </Button>
+          </div>
         </div>
       </div>
 

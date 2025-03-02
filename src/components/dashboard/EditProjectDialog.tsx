@@ -5,50 +5,61 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/lib/supabase";
 
-interface AddProjectDialogProps {
+interface EditProjectDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  project: {
+    id: string;
+    name: string;
+    description?: string;
+  } | null;
   onSuccess?: () => void;
 }
 
-export function AddProjectDialog({
+export function EditProjectDialog({
   open,
   onOpenChange,
+  project,
   onSuccess,
-}: AddProjectDialogProps) {
+}: EditProjectDialogProps) {
   const [name, setName] = React.useState("");
-  const [location, setLocation] = React.useState("");
   const [description, setDescription] = React.useState("");
   const [loading, setLoading] = React.useState(false);
 
+  React.useEffect(() => {
+    if (project) {
+      setName(project.name);
+      setDescription(project.description || "");
+    }
+  }, [project]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!project) return;
+
     setLoading(true);
 
     try {
-      const { error } = await supabase.from("projects").insert({
-        name: `${name} - ${location}`,
-        description: description,
-        status: "active",
-        created_at: new Date().toISOString(),
-      });
+      const { error } = await supabase
+        .from("projects")
+        .update({
+          name: name,
+          description: description,
+        })
+        .eq("id", project.id);
 
       if (error) throw error;
 
-      setName("");
-      setLocation("");
-      setDescription("");
       onOpenChange(false);
       onSuccess?.();
     } catch (error) {
-      console.error("Error creating project:", error);
+      console.error("Error updating project:", error);
     } finally {
       setLoading(false);
     }
@@ -58,35 +69,20 @@ export function AddProjectDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Create New Project</DialogTitle>
-          <DialogDescription>
-            Add a new landscaping project to your dashboard.
-          </DialogDescription>
+          <DialogTitle>Edit Project</DialogTitle>
         </DialogHeader>
 
         <form
-          id="add-project-form"
+          id="edit-project-form"
           onSubmit={handleSubmit}
           className="space-y-4"
         >
           <div className="space-y-2">
-            <Label htmlFor="name">Client Name</Label>
+            <Label htmlFor="name">Project Name</Label>
             <Input
               id="name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Walker Family"
-              required
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="location">Location</Label>
-            <Input
-              id="location"
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              placeholder="e.g. Yoakum, Texas"
               required
             />
           </div>
@@ -103,8 +99,8 @@ export function AddProjectDialog({
         </form>
 
         <DialogFooter>
-          <Button type="submit" form="add-project-form" disabled={loading}>
-            {loading ? "Creating..." : "Create Project"}
+          <Button type="submit" form="edit-project-form" disabled={loading}>
+            {loading ? "Saving..." : "Save Changes"}
           </Button>
         </DialogFooter>
       </DialogContent>

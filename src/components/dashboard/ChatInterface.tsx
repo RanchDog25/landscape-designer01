@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Send, Paperclip } from "lucide-react";
 import { uploadFile } from "@/lib/uploadFile";
 
@@ -20,59 +21,93 @@ interface Message {
 
 interface ChatInterfaceProps {
   projectId?: string;
+  isAllProjects?: boolean;
 }
 
-const ChatInterface: React.FC<ChatInterfaceProps> = ({ projectId }) => {
+const ChatInterface: React.FC<ChatInterfaceProps> = ({
+  projectId,
+  isAllProjects = false,
+}) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const user = getCurrentUser();
   const scrollAreaRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!projectId) {
-      setMessages([]);
-      return;
-    }
-
+    setMessages([]);
     loadMessages();
 
     // Subscribe to new messages
-    const channel = supabase
-      .channel(`messages-${projectId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "messages",
-          filter: `project_id=eq.${projectId}`,
-        },
-        (payload) => {
-          setMessages((prev) => [payload.new as Message, ...prev]);
-          // Scroll to bottom on new message
-          setTimeout(() => {
-            scrollAreaRef.current?.scrollTo({
-              top: scrollAreaRef.current.scrollHeight,
-              behavior: "smooth",
-            });
-          }, 100);
-        },
-      )
-      .subscribe();
+    let channel;
+
+    if (isAllProjects) {
+      // Subscribe to all messages
+      channel = supabase
+        .channel(`messages-all`)
+        .on(
+          "postgres_changes",
+          {
+            event: "INSERT",
+            schema: "public",
+            table: "messages",
+          },
+          (payload) => {
+            setMessages((prev) => [payload.new as Message, ...prev]);
+            // Scroll to bottom on new message
+            setTimeout(() => {
+              scrollAreaRef.current?.scrollTo({
+                top: scrollAreaRef.current.scrollHeight,
+                behavior: "smooth",
+              });
+            }, 100);
+          },
+        )
+        .subscribe();
+    } else if (projectId) {
+      // Subscribe to project-specific messages
+      channel = supabase
+        .channel(`messages-${projectId}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "INSERT",
+            schema: "public",
+            table: "messages",
+            filter: `project_id=eq.${projectId}`,
+          },
+          (payload) => {
+            setMessages((prev) => [payload.new as Message, ...prev]);
+            // Scroll to bottom on new message
+            setTimeout(() => {
+              scrollAreaRef.current?.scrollTo({
+                top: scrollAreaRef.current.scrollHeight,
+                behavior: "smooth",
+              });
+            }, 100);
+          },
+        )
+        .subscribe();
+    }
 
     return () => {
-      supabase.removeChannel(channel);
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
     };
-  }, [projectId]);
+  }, [projectId, isAllProjects]);
 
   const loadMessages = async () => {
-    if (!projectId) return;
-
-    const { data, error } = await supabase
+    let query = supabase
       .from("messages")
-      .select("*")
-      .eq("project_id", projectId)
+      .select("*, projects(name)")
       .order("created_at", { ascending: false });
+
+    // Only filter by project if not in "All Projects" view
+    if (!isAllProjects && projectId) {
+      query = query.eq("project_id", projectId);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       console.error("Error loading messages:", error);
@@ -121,11 +156,17 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ projectId }) => {
 
   const handleSendMessage = async (messageContent?: string) => {
     const content = messageContent || newMessage.trim();
-    if (!user?.id || !content || !projectId) return;
+    if (!user?.id || !content) return;
+
+    // Determine which project ID to use
+    const targetProjectId = isAllProjects
+      ? selectedProjectForMessage
+      : projectId;
+    if (!targetProjectId) return;
 
     try {
       const { error } = await supabase.from("messages").insert({
-        project_id: projectId,
+        project_id: targetProjectId,
         content: content,
         user_name: user.username,
         user_avatar:
@@ -151,15 +192,30 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ projectId }) => {
     }
   };
 
-  if (!projectId) {
-    return (
-      <div className="flex items-center justify-center h-full bg-background">
-        <p className="text-muted-foreground">
-          Select a project to start chatting
-        </p>
-      </div>
-    );
-  }
+  // State for project selection when in All Projects view
+  const [selectedProjectForMessage, setSelectedProjectForMessage] =
+    useState<string>("");
+  const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
+
+  // Load projects for the dropdown
+  useEffect(() => {
+    if (isAllProjects) {
+      const loadProjects = async () => {
+        const { data } = await supabase
+          .from("projects")
+          .select("id, name")
+          .is("deleted_at", null)
+          .order("name");
+
+        setProjects(data || []);
+        if (data && data.length > 0) {
+          setSelectedProjectForMessage(data[0].id);
+        }
+      };
+
+      loadProjects();
+    }
+  }, [isAllProjects]);
 
   return (
     <div className="flex flex-col h-full bg-background border rounded-lg">
@@ -170,6 +226,21 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ projectId }) => {
 
       {/* Message Input Area */}
       <div className="p-4 border-b bg-card flex-none">
+        {isAllProjects && (
+          <div className="mb-2">
+            <select
+              className="w-full p-2 border rounded mb-2"
+              value={selectedProjectForMessage}
+              onChange={(e) => setSelectedProjectForMessage(e.target.value)}
+            >
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <div className="flex gap-2 max-w-full">
           <input
             type="file"
@@ -226,6 +297,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ projectId }) => {
                   <Card
                     className={`p-3 ${message.user_name === user?.username ? "bg-primary text-primary-foreground" : "bg-muted"}`}
                   >
+                    {isAllProjects && message.projects?.name && (
+                      <div className="mb-1">
+                        <Badge variant="outline" className="text-xs">
+                          {message.projects.name}
+                        </Badge>
+                      </div>
+                    )}
                     <div className="flex flex-col">
                       <span className="text-sm font-medium">
                         {message.user_name || "User"}
