@@ -39,7 +39,7 @@ const DashboardHeader: React.FC<DashboardHeaderProps> = ({
     <header className="w-full h-[72px] px-6 border-b bg-white flex items-center justify-between">
       <div className="flex items-center gap-4">
         <img
-          src="/evergold-logo.svg"
+          src="/logo2.png"
           alt="Evergold Landscaping"
           className="h-12 mr-4"
         />

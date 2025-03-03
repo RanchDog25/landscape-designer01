@@ -24,6 +24,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 interface AddEventDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  initialDate?: Date;
   onAddEvent: (event: {
     title: string;
     description: string;
@@ -36,17 +37,32 @@ interface AddEventDialogProps {
 export function AddEventDialog({
   open,
   onOpenChange,
+  initialDate = new Date(),
   onAddEvent,
 }: AddEventDialogProps) {
   const [title, setTitle] = React.useState("");
   const [description, setDescription] = React.useState("");
-  const [date, setDate] = React.useState<Date>(new Date());
+  const [date, setDate] = React.useState<Date>(initialDate);
   const [type, setType] = React.useState<"milestone" | "task" | "meeting">(
     "task",
   );
   const [duration, setDuration] = React.useState<"all-day" | "half-day">(
     "all-day",
   );
+
+  // Update date when initialDate changes and reset form when dialog closes
+  React.useEffect(() => {
+    if (open) {
+      // Update the date when dialog opens with the initialDate
+      setDate(initialDate);
+    } else {
+      // Reset form when dialog closes
+      setTitle("");
+      setDescription("");
+      setType("task");
+      setDuration("all-day");
+    }
+  }, [open, initialDate]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -86,7 +102,7 @@ export function AddEventDialog({
               id="description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="min-h-[100px]"
+              className="min-h-[50px]"
             />
           </div>
 
@@ -106,22 +122,27 @@ export function AddEventDialog({
 
           <div className="space-y-2">
             <Label>Duration</Label>
-            <RadioGroup
-              value={duration}
-              onValueChange={(value: "all-day" | "half-day") =>
-                setDuration(value)
-              }
-              className="flex gap-4"
-            >
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="all-day" id="all-day" />
-                <Label htmlFor="all-day">All Day</Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="half-day" id="half-day" />
-                <Label htmlFor="half-day">Half Day</Label>
-              </div>
-            </RadioGroup>
+            <div className="flex items-center justify-between">
+              <RadioGroup
+                value={duration}
+                onValueChange={(value: "all-day" | "half-day") =>
+                  setDuration(value)
+                }
+                className="flex gap-4"
+              >
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="all-day" id="all-day" />
+                  <Label htmlFor="all-day">All Day</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="half-day" id="half-day" />
+                  <Label htmlFor="half-day">Half Day</Label>
+                </div>
+              </RadioGroup>
+              <Button type="submit" form="add-event-form">
+                Add Event
+              </Button>
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -130,6 +151,7 @@ export function AddEventDialog({
               <Calendar
                 mode="single"
                 selected={date}
+                month={date}
                 onSelect={(date) => date && setDate(date)}
                 className="w-full"
               />
@@ -137,11 +159,7 @@ export function AddEventDialog({
           </div>
         </form>
 
-        <DialogFooter>
-          <Button type="submit" form="add-event-form">
-            Add Event
-          </Button>
-        </DialogFooter>
+        {/* Button moved next to Half Day radio button */}
       </DialogContent>
     </Dialog>
   );
